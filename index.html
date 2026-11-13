@@ -594,6 +594,13 @@ button,.frase,.posto,.liv,.linguetta,.opz,.scelta{touch-action:manipulation;-web
   .scrivania{width:100%}
   .scrivania.zoom .scrivania-in{width:222%;margin-left:-98%;margin-top:-17%}
 }
+
+/* ---------- il sostegno: imbeccate ---------- */
+.posto.guida{font-family:var(--f-mano);font-style:italic;font-size:16.5px;color:#5d4a2c;border:1px dashed var(--k);background:rgba(255,253,244,.42)}
+.imbeccate{display:block}
+textarea:not(:placeholder-shown) + .imbeccate{display:none}
+.imbeccata{display:inline-block;margin:6px 6px 0 0;padding:6px 13px;border-radius:15px;border:1px dashed rgba(18,62,144,.65);background:rgba(18,62,144,.08);color:var(--blu);font-family:var(--f-mano);font-style:italic;font-size:16.5px;text-align:left}
+.imbeccata:hover{background:rgba(18,62,144,.17)}
 </style>
 </head>
 <body>
@@ -673,6 +680,9 @@ var CONFIG = {
   voce: true,           // Dobby parla ad alta voce (servono le cuffie)
   musica: true,         // musica di sottofondo (serve la rete)
   suoni: true,          // suoni di gioco (prova archiviata, libro sbloccato)
+  imbeccate: true,      // sostegno iniziale: inizi di frase e indicazioni nei posti vuoti (false = «posto libero»)
+  velocitaLettura: 0.75, // «Ascolta la carta»: 1 = velocità normale della sintesi, più basso = più lento
+  pausaLettura: 600,    // millisecondi di pausa tra una frase e l'altra nella lettura delle carte
   stesura: 'schermo',   // 'schermo' | 'mano' | 'scelta' (lo studente decide)
   pin: '2806'           // PIN del pannello docente: è un deterrente, non una sicurezza
 };
@@ -704,6 +714,37 @@ var SEZIONI = [
   {id:'catene',  l:'k', nome:'Catene',  domanda:'La sua condizione di servo'},
   {id:'voce',    l:'v', nome:'Voce',    domanda:'Come parla'}
 ];
+
+/* IL SOSTEGNO (scaffolding), chiesto da Andrea il 13/11/2026: aiutare all'inizio «imbeccando un po' la frase»,
+   e togliere l'aiuto man mano.
+   - posti: che cosa dice ogni posto vuoto del registro. Il primo indica anche le carte in cui cercare e l'inizio
+     della frase; il secondo solo l'inizio; il terzo solo una domanda. L'aiuto cala da solo riempiendo i posti.
+   - avvii: inizi di frase per «Che cosa dimostra?». Si offrono sempre nelle prime cinque prove, poi a richiesta. */
+var IMBECCATE = {
+  aspetto:{posti:['Cerca nelle carte I e II com’è fatto Dobby. «Dobby è alto…»','E che cosa indossa? «Addosso porta…»','Che cos’altro si nota di lui?'],
+           avvii:['Questa frase fa vedere che Dobby è','Dal vestito si capisce che']},
+  magia:{posti:['Cerca nelle carte I e III che cosa sa fare senza bacchetta. «Gli basta…»','Una magia che Dobby ha fatto davvero. «Dobby fece…»','Dove arriva la sua magia, e quella dei maghi no?'],
+         avvii:['Questa frase dimostra che Dobby sa','Vuol dire che gli elfi, a differenza dei maghi,']},
+  cuore:{posti:['Cerca nelle carte II e III che cosa prova o che cosa sceglie. «Dobby decise di…»','Un gesto che mostra il suo carattere. «Quando qualcuno…»','Che cosa lo rende diverso dagli altri elfi?'],
+         avvii:['Da qui capisco che Dobby prova','Questa frase mostra che Dobby è uno che']},
+  catene:{posti:['Cerca nelle carte I e V che cosa un elfo è obbligato a fare. «Deve…»','E che cosa gli è vietato? «Non…»','Che cosa succede se disobbedisce?'],
+          avvii:['Questa frase dimostra che Dobby non può','Vuol dire che un elfo è costretto a']},
+  voce:{posti:['Cerca nelle carte II e IV come Dobby chiama sé stesso. «Non dice mai…»','E come si rivolge agli altri? «Signore…»','Che cos’altro è tipico del suo modo di parlare?'],
+        avvii:['Si capisce che Dobby, quando parla,','Questa frase mostra che Dobby non dice mai']}
+};
+/* Inizi di frase per i campi delle stanze 2 e 3: compaiono sotto il campo finché è vuoto («Comincia così»). */
+var AVVII = {
+  'ritratto.aspetto':'Dobby è', 'ritratto.magia':'Dobby sa', 'ritratto.cuore':'Dobby è uno che', 'ritratto.catene':'Dobby vive', 'ritratto.voce':'Quando parla, Dobby',
+  'umano':'Anche se non è un uomo, Dobby', 'ruolo.perche':'Ho scelto questo ruolo perché',
+  'scelte.inizio':'La storia comincia', 'scelte.nascita':'All’inizio Dobby era', 'scelte.compagni':'Con lui c’è',
+  'scelte.desiderio':'Più di tutto Dobby desidera', 'scelte.ostacolo':'Glielo impedisce', 'scelte.arrivo':'Dobby arriva dai Malfoy perché'
+};
+/* Più avanti il sostegno si fa più leggero: solo un suggerimento in grigio dentro il campo. */
+var SEGNAPOSTI = {
+  'regole.0':'Dobby non dice mai…', 'regole.1':'Dobby chiama gli altri…', 'regole.2':'Quando è emozionato, Dobby…', 'regole.3':'Un’altra regola…',
+  'scaletta.s1':'All’inizio Dobby…', 'scaletta.s2':'Un giorno però…', 'scaletta.s3':'Allora Dobby…', 'scaletta.s4':'Il momento più difficile arriva quando…', 'scaletta.s5':'Alla fine Dobby…',
+  'finali.f1':'La prova è… perché…', 'finali.f2':'La scelta più difficile è stata…', 'finali.f3':'Un’altra volta…'
+};
 
 var TIPI = [
   ['narrativo','Narrativo: racconta dei fatti, uno dopo l’altro'],
@@ -1329,6 +1370,14 @@ function forma(t){
   return out;
 }
 
+/* Toglie da una spiegazione l'inizio di frase offerto come sostegno: serve a capire se lo studente ha aggiunto del suo. */
+function senzaAvvio(t, avvii){
+  t=String(t||'').trim();
+  for(var i=0;i<avvii.length;i++){ if(t.toLowerCase().indexOf(avvii[i].toLowerCase())===0) return t.slice(avvii[i].length).trim(); }
+  return t;
+}
+function tuttiGliAvvii(){ var out=['Questa frase fa capire che']; Object.keys(IMBECCATE).forEach(function(k){ out=out.concat(IMBECCATE[k].avvii); }); return out; }
+
 /* Gli obiettivi di una stanza, per il pannello «Missione»: gli stessi minimi di minimo(), uno per riga. */
 function obiettivi(l, n, cfg){
   var o=[];
@@ -1441,6 +1490,9 @@ function provaLogica(){
   v('forma: punto finale', ha(forma('Il piccolo Dobby tremava nella neve'), 'ultima frase'));
   v('forma: testo pulito', forma('Dobby uscì. Poi tornò indietro, in silenzio.').length===0);
   v('forma: vuoto', forma('').length===0 && ortografia('').length===0);
+  v('sostegno: inizio di frase da solo non basta', contaParole(senzaAvvio('Questa frase dimostra che Dobby sa', tuttiGliAvvii()))===0);
+  v('sostegno: inizio più parole proprie', contaParole(senzaAvvio('Questa frase dimostra che Dobby sa spostare gli oggetti', tuttiGliAvvii()))===3);
+  v('sostegno: tre imbeccate e due avvii per sezione', SEZIONI.every(function(s){ return IMBECCATE[s.id].posti.length===3 && IMBECCATE[s.id].avvii.length===2; }));
   v('obiettivi: sei nella prima stanza, nessuno fatto', obiettivi(L,1,cfg).length===6 && obiettivi(L,1,cfg).every(function(o){ return !o.ok; }));
   v('obiettivi: coerenti con minimo', [1,2,3,4,5].every(function(n){ return obiettivi(L,n,cfg).every(function(o){ return o.ok; })===minimo(L,n,cfg).ok; }));
   return {ok:ok, falliti:falliti};
@@ -1553,7 +1605,7 @@ var voce = {
         if(finito) return; finito=true; clearInterval(tic); clearTimeout(guardia);
         if(id!==io.corr) return;
         accendi(quante); if(o.finePezzo) o.finePezzo(n);
-        setTimeout(prossimo, (dato||sintesi)?170:60);
+        setTimeout(prossimo, (dato||sintesi)?(o.pausa||170):60);
       }
       var guardia = setTimeout(chiudi, stimato + ((dato||sintesi)?3000:0));
       if(o.inizioPezzo) o.inizioPezzo(n);
@@ -1888,7 +1940,17 @@ AZ.sub = function(el){ L.sub[L.vista]=el.getAttribute('data-sub'); salvaPoi(); d
 function linguette(voci, qui){
   return '<div class="linguette">'+voci.map(function(v){ return '<button class="linguetta '+(v.id===qui?'qui':'')+'" data-az="sub" data-sub="'+v.id+'"><i class="pallino '+(v.ok?'ok':'')+'"></i>'+v.nome+'</button>'; }).join('')+'</div>';
 }
-function campo(m, righe, segnaposto){ return '<textarea data-m="'+m+'" rows="'+(righe||2)+'"'+(segnaposto?' placeholder="'+esc(segnaposto)+'"':'')+'>'+esc(prendi(L,m))+'</textarea>'; }
+/* Un campo di testo. Con il sostegno acceso, sotto il campo vuoto compare «Comincia così»: un tocco scrive
+   l'inizio della frase. Sparisce da solo appena il campo contiene qualcosa (regola CSS su :placeholder-shown). */
+function campo(m, righe, segnaposto){
+  var avvio=cfg.imbeccate && AVVII[m], sp=segnaposto || (cfg.imbeccate && SEGNAPOSTI[m]) || (avvio?avvio+'…':'');
+  return '<textarea data-m="'+m+'" rows="'+(righe||2)+'" placeholder="'+esc(sp||' ')+'">'+esc(prendi(L,m))+'</textarea>'+
+    (avvio?'<span class="imbeccate"><button type="button" class="imbeccata" data-az="imbecca" data-per="'+m+'" data-t="'+esc(avvio)+'">Comincia così: «'+esc(avvio)+'…»</button></span>':'');
+}
+AZ.imbecca = function(el){
+  var t=$('stanza').querySelector('[data-m="'+el.getAttribute('data-per')+'"]'); if(!t || t.value.trim()) return;
+  t.value=el.getAttribute('data-t')+' '; t.dispatchEvent(new Event('input', {bubbles:true})); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+};
 function capNome(id){ return SEZIONI.filter(function(s){ return s.id===id; })[0].nome; }
 var COL = {aspetto:['#A47A22','rgba(164,122,34,.38)'], magia:['#6D4FB0','rgba(109,79,176,.3)'], cuore:['#3B8A60','rgba(59,138,96,.32)'], catene:['#566070','rgba(86,96,112,.34)'], voce:['#123E90','rgba(18,62,144,.26)']};
 
@@ -1918,7 +1980,7 @@ function registroHtml(){
     h+='<div class="capitolo" style="--k:'+COL[s.id][0]+'"><h4>'+s.nome+'<small>'+s.domanda+'</small></h4><div class="posti">';
     for(k=0;k<3;k++){
       var p=pp[k];
-      if(!p){ h+='<div class="posto">posto libero</div>'; continue; }
+      if(!p){ h+=(cfg.imbeccate ? '<div class="posto guida">'+esc(IMBECCATE[s.id].posti[k])+'</div>' : '<div class="posto">posto libero</div>'); continue; }
       var deb = evidenza && evidenza.deboli[p.id];
       h+='<div class="posto pieno'+(deb?' debole':'')+'" data-az="apriProva" data-id="'+p.id+'" tabindex="0"><span><q>'+esc(p.testo)+'</q><span class="perche">'+esc(p.perche)+'</span>'+(deb?'<span class="perche debole">'+esc(MOTIVI[deb])+'</span>':'')+'</span><span class="da">'+(p.libro?'dal libro':'Carta '+trovaDoc(p.doc).n)+'</span></div>';
     }
@@ -1949,7 +2011,7 @@ AZ.leggiCarta = function(el){
   if(!voce.it){ dobby.di(DICE.senzaVoce); return; }
   dobby.zitto(); el.setAttribute('data-su','1'); el.lastChild.textContent='Ferma la lettura';
   function spegni(){ var a=box.querySelectorAll('.letta'), i; for(i=0;i<a.length;i++) a[i].classList.remove('letta'); }
-  voce.dici(d.frasi.map(function(f){ return f.t; }), {parla:true, sintesi:true, pitch:1, rate:.94,
+  voce.dici(d.frasi.map(function(f){ return f.t; }), {parla:true, sintesi:true, pitch:1, rate:cfg.velocitaLettura||.75, pausa:cfg.pausaLettura||600,
     inizioPezzo:function(n){ spegni(); var s=box.querySelector('[data-i="'+n+'"]'); if(s){ s.classList.add('letta'); s.scrollIntoView({block:'nearest', behavior:'smooth'}); } },
     fine:function(){ spegni(); el.removeAttribute('data-su'); el.lastChild.textContent='Ascolta la carta'; }});
 };
@@ -1974,7 +2036,14 @@ function schedaProva(){
     h+='<div class="avviso" style="margin-bottom:12px">Il capitolo «'+capNome(b.sez)+'» è pieno. Per far posto bisogna togliere una prova: qual è la più debole?'+
       L.dossier[b.sez].map(function(p){ return '<div class="voce-riga"><q>'+esc(p.testo)+'</q><button class="btn sec mini" data-az="bzTogli" data-id="'+p.id+'">Togli</button></div>'; }).join('')+'</div>';
   }
-  h+='<label class="et" for="bzPerche">Che cosa dimostra? Dillo con parole tue</label><textarea id="bzPerche" rows="2" placeholder="Questa frase fa capire che…">'+esc(b.perche)+'</textarea>'+
+  h+='<label class="et" for="bzPerche">Che cosa dimostra? Dillo con parole tue</label><textarea id="bzPerche" rows="2" placeholder="Questa frase fa capire che…">'+esc(b.perche)+'</textarea>';
+  if(cfg.imbeccate){
+    // sostegno che cala: nelle prime cinque prove gli inizi di frase sono sempre in vista, poi si chiedono
+    var avvii=b.sez?IMBECCATE[b.sez].avvii:['Questa frase fa capire che'];
+    if(tutteLeProve(L).length<5 || b.aiuto) h+='<span class="imbeccate" style="display:block">'+avvii.map(function(a){ return '<button type="button" class="imbeccata" data-az="bzAvvio" data-t="'+esc(a)+'">Comincia così: «'+esc(a)+'…»</button>'; }).join('')+'</span>';
+    else h+='<span class="imbeccate" style="display:block"><button type="button" class="imbeccata" data-az="bzAiuto">Mi serve un inizio</button></span>';
+  }
+  h+=
      '<p class="esito no" id="bzEsito"></p><div class="riga">'+(b.id && trovaProva(b.id)?'<button class="btn sec mini" data-az="bzElimina">Togli dal registro</button>':'')+
      '<span class="spinta"></span><button class="btn sec" data-az="chiudi">Annulla</button><button class="btn" data-az="bzSalva">Metti nel registro</button></div>';
   return h;
@@ -1995,6 +2064,8 @@ AZ.apriProva = function(el){
 AZ.provaLibro = function(){ bozza={id:'', testo:'', sez:'', perche:'', libro:{titolo:LIBRI[1], cap:''}}; apri(schedaProva()); };
 AZ.bzSez = function(el){ leggiBozza(); bozza.sez=el.getAttribute('data-sez'); apri(schedaProva()); $('bzPerche').focus(); };
 function togliProva(id){ SEZIONI.forEach(function(s){ L.dossier[s.id]=L.dossier[s.id].filter(function(p){ return p.id!==id; }); }); evidenza=null; L.livelloControllo=0; }
+AZ.bzAvvio = function(el){ var t=$('bzPerche'); t.value=el.getAttribute('data-t')+' '; t.focus(); t.setSelectionRange(t.value.length, t.value.length); };
+AZ.bzAiuto = function(){ leggiBozza(); bozza.aiuto=true; apri(schedaProva()); $('bzPerche').focus(); };
 AZ.bzTogli = function(el){ leggiBozza(); togliProva(el.getAttribute('data-id')); salva(); apri(schedaProva()); };
 AZ.bzElimina = function(){ togliProva(bozza.id); salva(); chiudi(); rifai(); dobby.di(DICE.provaTolta); };
 AZ.bzSalva = function(){
@@ -2003,6 +2074,7 @@ AZ.bzSalva = function(){
   if(b.libro && contaParole(b.testo)<3){ e.textContent='Manca la frase del libro.'; return; }
   if(b.libro && !b.libro.cap.trim()){ e.textContent='In quale capitolo l’hai trovata?'; return; }
   if(!b.sez){ e.textContent='Scegli il capitolo del registro.'; return; }
+  if(contaParole(senzaAvvio(b.perche, tuttiGliAvvii()))<2){ e.textContent='La frase è solo cominciata: finiscila tu. Che cosa dimostra?'; return; }
   if(contaParole(b.perche)<4){ e.textContent='Dobby chiede almeno qualche parola: che cosa dimostra questa frase?'; return; }
   if(L.dossier[b.sez].length>=3 && !L.dossier[b.sez].some(function(p){ return p.id===b.id; })){ e.textContent='Il capitolo è pieno: prima togli una prova.'; return; }
   var id=b.id||nuovoId(), p={id:id, testo:b.testo.trim(), perche:b.perche.trim()};
@@ -2072,7 +2144,7 @@ VISTE[2] = function(){
   }
   if(sub==='officina'){
     h+='<div class="griglia2"><div><h4 style="margin:0 0 4px;font-family:var(--f-tit)">1 · Le regole della voce</h4><p class="nota" style="margin:0 0 8px">Rileggi la carta IV e le tue prove del capitolo «Voce». Come parla Dobby? Scrivi le regole che hai scoperto: almeno due.</p>'+
-      [0,1,2,3].map(function(i){ return '<input type="text" data-m="regole.'+i+'" value="'+esc(L.regole[i]||'')+'" placeholder="Regola '+(i+1)+'" style="margin-bottom:7px" maxlength="160">'; }).join('')+
+      [0,1,2,3].map(function(i){ return '<input type="text" data-m="regole.'+i+'" value="'+esc(L.regole[i]||'')+'" placeholder="'+esc(cfg.imbeccate?SEGNAPOSTI['regole.'+i]:'Regola '+(i+1))+'" style="margin-bottom:7px" maxlength="160">'; }).join('')+
       (L.regoleViste ? '<div class="fatta" style="margin-top:8px"><b>Le regole di Dobby.</b> Confrontale con le tue: ne avevi trovate altre? Ti era sfuggito qualcosa?'+REGOLE.map(function(r){ return '<div class="regola">'+esc(r)+'</div>'; }).join('')+'</div>'
         : '<button class="btn sec mini" data-az="vediRegole">Confronta con le regole di Dobby</button>')+
       '<h4 style="margin:18px 0 4px;font-family:var(--f-tit)">Due voci in una storia</h4><p class="nota" style="margin:0">Chi racconta usa la lingua di tutti. Dobby usa la sua. In una storia le due voci non si mescolano.</p>'+
@@ -2424,7 +2496,7 @@ function apriDocente(){
   var kk=chiaviLavori();
   function si(k, et){ return '<label style="display:flex;gap:8px;align-items:center;margin:5px 0"><input type="checkbox" data-cfg="'+k+'"'+(cfg[k]?' checked':'')+' style="width:20px;height:20px;accent-color:var(--blu)">'+et+'</label>'; }
   apri('<h3>Pannello docente</h3><p class="nota" style="margin:0 0 10px">Le scelte valgono solo su questo computer. Per tutti i Mac conviene cambiare il blocco CONFIG in cima al file prima di copiarlo.</p>'+
-    '<div class="griglia2"><div>'+si('doc7','Carta VII accesa (racconta la morte di Dobby)')+si('voce','Dobby parla ad alta voce')+si('musica','Musica di sottofondo')+si('suoni','Suoni di gioco')+
+    '<div class="griglia2"><div>'+si('doc7','Carta VII accesa (racconta la morte di Dobby)')+si('voce','Dobby parla ad alta voce')+si('musica','Musica di sottofondo')+si('suoni','Suoni di gioco')+si('imbeccate','Sostegno: inizi di frase e indicazioni')+
     '<label class="et" style="margin-top:10px" for="cfgStesura">Stesura</label><select id="cfgStesura" data-cfg="stesura"><option value="schermo">a schermo</option><option value="mano">a mano</option><option value="scelta">sceglie lo studente</option></select></div>'+
     '<div><label class="et">Prove minime per capitolo</label><input type="text" data-cfg="proveMin" value="'+cfg.proveMin+'" style="max-width:100px"><label class="et" style="margin-top:8px">Parole: minimo e bersaglio</label><div class="riga"><input type="text" data-cfg="paroleMin" value="'+cfg.paroleMin+'" style="max-width:100px"><input type="text" data-cfg="paroleMax" value="'+cfg.paroleMax+'" style="max-width:100px"></div></div></div>'+
     '<div class="riga" style="margin:14px 0"><button class="btn sec mini" data-az="cfgSalva">Applica</button>'+(L?'<button class="btn sec mini" data-az="sblocca">Apri tutti i libri a '+esc(L.nome)+'</button>':'')+'<button class="btn sec mini" data-az="rubricaVuota">Stampa la rubrica</button></div>'+
